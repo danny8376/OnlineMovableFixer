@@ -1,0 +1,337 @@
+<!DOCTYPE HTML>
+<html data-bs-theme="dark">
+<head>
+    <title>BannerBomb3 Generic Loader</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+</head>
+<body>
+    <div class="row align-items-center justify-content-center">
+        <div class="col-lg-6 col-md-8 col-sm-12 col-xs-12 col">
+            <div class='card'>
+                <div class="card-header bg-primary h2">
+                    Movable Fixer/Extractor
+                </div>
+                <div class="card-body">
+                    <form class="form">
+                        <div class="border-info mb-3">
+                            <label for="formFile" class="form-label">Pick your movable.sed/essential.exefs/NAND Backup</label>
+                            <input class="form-control form-control-lg" type="file" id="movable" disabled>
+                        </div>
+                        <div class="card border-info mb-3">
+                            <div class="card-header">Movable Info</div>
+                            <div class="card-body" id="info">No file selected yet.</div>
+                        </div>
+                        <div class="border-info mb-3">
+                            <div id="entries"></div>
+                            <div class="form-group">
+                                <input type="button" id="fixed" value="Fixed movable.sed" class="btn btn-primary" disabled>
+                                <input type="button" id="original" value="Original movable.sed" class="btn btn-secondary" disabled>
+                                <div class="form-check d-none" id="allowWrapper">
+                                    <input class="form-check-input" type="checkbox" value="" id="allow">
+                                    <label class="form-check-label" for="allow"><small>I know what I'm doing, just give me seedminer movable</small></label>
+                                </div>
+                                <div class="form-check d-none" id="lfcsWrapper">
+                                    <input class="form-check-input" type="checkbox" value="" id="lfcs">
+                                    <label class="form-check-label" for="lfcs"><small>Fill LFCS from essential backup</small></label>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script -->
+    <script>
+        const movableDom = document.querySelector("#movable");
+        const infoDom = document.querySelector("#info");
+        const fixedBtn = document.querySelector("#fixed");
+        const originalBtn = document.querySelector("#original");
+        const allowWrapDom = document.querySelector("#allowWrapper");
+        const allowDom = document.querySelector("#allow");
+        const lfcsWrapDom = document.querySelector("#lfcsWrapper");
+        const lfcsDom = document.querySelector("#lfcs");
+        const movableDefault = {
+            bytes: null,
+            seedminer: false,
+            pack: false,
+            lfcs: null
+        };
+        const movable = Object.assign({}, movableDefault);
+
+        const movableMagic = new Uint8Array([0x53, 0x45, 0x45, 0x44]); // SEED
+        const essentialMagics = [ // ref: https://github.com/d0k3/GodMode9/blob/031762a1fe7af334a1b9ff5225c5f8e3927fa977/arm9/source/utils/nandutil.c#L41-L50
+        	[0x00, new Uint8Array([0x6e, 0x61, 0x6e, 0x64, 0x5f, 0x68, 0x64, 0x72, 0x00, 0x00, 0x00, 0x00])],
+        	[0x10, new Uint8Array([0x73, 0x65, 0x63, 0x69, 0x6e, 0x66, 0x6f, 0x00, 0x00, 0x02, 0x00, 0x00])],
+        	[0x20, new Uint8Array([0x6d, 0x6f, 0x76, 0x61, 0x62, 0x6c, 0x65, 0x00, 0x00, 0x04, 0x00, 0x00])],
+        	[0x30, new Uint8Array([0x66, 0x72, 0x6e, 0x64, 0x73, 0x65, 0x65, 0x64, 0x00, 0x06, 0x00, 0x00])],
+        	[0x40, new Uint8Array([0x6e, 0x61, 0x6e, 0x64, 0x5f, 0x63, 0x69, 0x64, 0x00, 0x08, 0x00, 0x00])],
+        	[0x50, new Uint8Array([0x6f, 0x74, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00])],
+        	//[0x60, new Uint8Array([0x68, 0x77, 0x63, 0x61, 0x6c, 0x30, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00])],
+        	//[0x70, new Uint8Array([0x68, 0x77, 0x63, 0x61, 0x6c, 0x31, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00])],
+        ];
+        const nandMagic = new Uint8Array([0x4E, 0x43, 0x53, 0x44]); // NCSD
+
+        function updateEnablement() {
+            fixedBtn.disabled = !(movable.bytes && (!movable.seedminer || allowDom.checked || lfcsDom.checked));
+            originalBtn.disabled = !movable.bytes
+            if (movable.seedminer) {
+                allowWrapDom.classList.remove("d-none");
+                allowDom.disabled = lfcsDom.checked;
+                if (lfcsDom.checked) {
+                    allowDom.checked = false;
+                }
+            } else {
+                allowWrapDom.classList.add("d-none");
+            }
+            if (movable.seedminer && movable.lfcs) {
+                lfcsWrapDom.classList.remove("d-none");
+            } else {
+                lfcsWrapDom.classList.add("d-none");
+            }
+        }
+
+        function updateMovableInfo() {
+            if (movable.bytes === null || (movable.bytes.length != 288 && movable.bytes.length != 320)) {
+                infoDom.innerHTML += "ERROR!?";
+                return;
+            }
+
+            if (movable.seedminer) {
+                infoDom.innerHTML += '<p class="text-warning">This movable is from seedminer!</p>';
+            }
+
+            const flags = movable.bytes.slice(0x4, 0x8);
+            switch (flags[1]) {
+                case 0:
+                    if (flags[0] != 0 || flags[2] != 0 || flags[3] != 0) {
+                        infoDom.innerHTML += '<p class="text-warning">This movable have werid flags...?</p>';
+                    } else if (!movable.seedminer) {
+                        infoDom.innerHTML += '<p class="text-info">This movable doesn\'t need any fix.</p>';
+                    }
+                    break;
+                case 1:
+                    if (movable.bytes.length == 288) {
+                        infoDom.innerHTML += '<p class="text-warning">This movable have mac flag with invalid size!</p>';
+                    }
+                    break;
+                default:
+                    infoDom.innerHTML += '<p class="text-warning">This movable have werid flags...?</p>';
+            }
+
+            if (movable.pack && infoDom.querySelector(".text-warning:not(.pack)")) {
+                infoDom.innerHTML += '<p class="bg-danger text-warning">!!! Your embed movable is problematic, you need to update your embed essential backup and NAND backup !!!</p>';
+            }
+
+            infoDom.innerHTML += 'Movable is loaded and ready.';
+            updateEnablement();
+        }
+        
+        async function verifyMovable(bytes) {
+            if (bytes instanceof Blob) bytes = await bytes.bytes();
+            if (indexedDB.cmp(bytes.slice(0, 4), movableMagic) === 0) {
+                if (bytes.slice(0x4, 0x110).every(b => b == 0)) {
+                    console.log("Seedminer movable");
+                    Object.assign(movable, { bytes, seedminer: true });
+                    return true;
+                } else {
+                    console.log("SEED");
+                    Object.assign(movable, { bytes, seedminer: false });
+                    return true;
+                }
+            } else {
+                if (bytes.slice(0x0, 0x110).every(b => b == 0) &&
+                    (bytes.length == 288 || bytes.slice(0x120, 0x140).every(b => b == 0))) {
+                    console.log("Old seedminer movable");
+                    Object.assign(movable, { bytes, seedminer: true });
+                    return true;
+                } else {
+                    console.log("Not SEED");
+                    return false;
+                }
+            }
+        }
+
+        async function verifyEssentialAndExtractMovable(file) {
+            const check = ([offset, magic]) => new Promise(async (resolve, reject) => {
+                if (indexedDB.cmp(await file.slice(offset, offset + magic.length).bytes(), magic) === 0) {
+                    resolve();
+                } else {
+                    reject();
+                }
+            });
+
+            try {
+                await Promise.all(essentialMagics.map(check))
+            } catch {
+                console.log("Essential magic check failed!");
+                return null;
+            }
+
+            if ((await file.slice(0x60, 0x68).bytes()).every(b => b == 0)) {
+                infoDom.innerHTML += '<p class="pack text-warning">Your essential backup is old format, which lack hwcal, you might want to update it and your NAND backup.</p>';
+            }
+
+            const size = await file.slice(0x2C, 0x30).bytes();
+            console.log("Movable Size:", size);
+            if (indexedDB.cmp(size.slice(1, 4), new Uint8Array([1, 0, 0])) !== 0 ||
+                (size[0] != 0x20 && size[0] != 0x40)) {
+                console.log("Size of movable inside essential is invalid!");
+                return "size";
+            }
+
+            const bytes = await file.slice(0x600, 0x600 + 0x100 + size[0]).bytes();
+            const checksum = await file.slice(0x1A0, 0x1C0).bytes();
+            const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+            console.log("Movable Checksum:", checksum, "Calculated:", sha);
+            if (indexedDB.cmp(checksum, sha) !== 0) {
+                console.log("Checksum of movable inside essential failed!");
+                return "checksum";
+            }
+            return bytes;
+        }
+
+        async function extractLFCSFromEssential(file) {
+            const size = await file.slice(0x3C, 0x40).bytes();
+            console.log("LFCS Size:", size);
+            if (indexedDB.cmp(size, new Uint8Array([0x10, 1, 0, 0])) !== 0) {
+                console.log("Size of LFCS inside essential is invalid!");
+                return null;
+            }
+
+            const bytes = await file.slice(0x800, 0x910).bytes();
+            const checksum = await file.slice(0x180, 0x1A0).bytes();
+            const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+            console.log("LFCS Checksum:", checksum, "Calculated:", sha);
+            if (indexedDB.cmp(checksum, sha) !== 0) {
+                console.log("Checksum of LFCS inside essential failed!");
+                return null;
+            }
+            return bytes;
+        }
+
+        async function verifyNANDAndExtractEssential(file) {
+            if (indexedDB.cmp(await file.slice(0x100, 0x104).bytes(), nandMagic) !== 0) {
+                return null;
+            }
+
+            return file.slice(0x200, 0x2400);
+        }
+
+        async function verifyMovableThenUpdate(file) {
+            if (!await verifyMovable(file)) return false;
+
+            updateMovableInfo();
+            return true;
+        }
+
+        async function verifyEssentialThenUpdate(file) {
+            const extracted = await verifyEssentialAndExtractMovable(file);
+
+            if (!extracted) return false;
+
+            movable.pack = true;
+            if (extracted instanceof Uint8Array) {
+                if (await verifyMovableThenUpdate(extracted)) {
+                    const lfcs = await extractLFCSFromEssential(file);
+                    const keyYL = movable.bytes.slice(0x110, 0x118);
+                    const lfcsK = lfcs.slice(0x108, 0x110);
+                    console.log("Movable & LFCS:", keyYL, lfcsK);
+                    if (indexedDB.cmp(keyYL, lfcsK) === 0) {
+                        movable.lfcs = lfcs;
+                        updateEnablement();
+                    }
+                } else {
+                    infoDom.innerHTML += '<p class="pack bg-danger text-warning">!!! Your embed movable is completely invalid, you need to update your embed essential backup and NAND backup !!!</p>';
+                }
+            } else if (extracted === "size") {
+                infoDom.innerHTML = '<p class="pack text-warning">Essential is probably corrupted: embed movable size in invalid.</p>';
+            } else if (extracted === "checksum") {
+                infoDom.innerHTML = '<p class="pack text-warning">Essential is probably corrupted: embed movable checksum doesn\'t match.</p>';
+            }
+            return true;
+        }
+
+        async function verifyNANDThenUpdate(file) {
+            const extracted = await verifyNANDAndExtractEssential(file);
+            if (!extracted) return false;
+
+            if (!await verifyEssentialThenUpdate(extracted)) {
+                infoDom.innerHTML = '<p class="pack text-warning">Your NAND doesn\'t have (valid) embed essential backup.</p>';
+            }
+            return true;
+        }
+
+        async function fileSelected(filelist) {
+            Object.assign(movable, movableDefault);
+            infoDom.innerHTML = "";
+            allowDom.checked = false;
+            lfcsDom.checked = false;
+            updateEnablement();
+
+            for (const file of filelist) {
+                // filename is kinda meaningless...
+                // hope depends on file size is fine?
+                console.log(file)
+                switch (file.size) {
+                    case 288:
+                    case 320:
+                        if (await verifyMovableThenUpdate(file)) return;
+                        break;
+                    case 3584:
+                    case 8704:
+                        if (await verifyEssentialThenUpdate(file)) return;
+                        break;
+                    default:
+                        if (await verifyNANDThenUpdate(file)) return;
+                }
+            }
+            infoDom.innerText = "The file you selected is not valid.";
+        }
+
+		function saveMovable(bytes) {
+			if (!bytes) bytes = movable.bytes;
+		    const blob = new Blob([bytes], { type: "application/octet-stream" });
+		    const link = document.createElement("a");
+		    link.href = URL.createObjectURL(blob);
+		    link.download = "movable.sed";
+		    link.click();
+		};
+
+        fixedBtn.addEventListener("click", event => {
+            if (!movable.bytes) return;
+            const fixed = new Uint8Array(288);
+            fixed.set(movableMagic);
+            if (movable.lfcs && lfcsDom.checked) {
+                fixed.set(movable.lfcs, 0x8);
+            } else {
+                fixed.set(movable.bytes.slice(0x8, 0x118), 0x8)
+            }
+            fixed.set(movable.bytes.slice(0x118, 0x120), 0x118);
+            saveMovable(fixed);
+        });
+        originalBtn.addEventListener("click", event => {
+            if (!movable.bytes) return;
+			saveMovable();
+        });
+        allowDom.addEventListener("change", updateEnablement);
+        lfcsDom.addEventListener("change", updateEnablement);
+        
+        window.addEventListener("dragover", event => {
+            event.preventDefault();
+        });
+        window.addEventListener("drop", event => {
+            event.preventDefault();
+            movableDom.value = "";
+            fileSelected(event.dataTransfer.files);
+        });
+
+        movableDom.addEventListener("change", event => {
+            fileSelected(movableDom.files);
+        })
+        movableDom.disabled = false;
+        fixedBtn.disabled = true;
+        originalBtn.disabled = true;
+    </script>
+</body>
+</html>
