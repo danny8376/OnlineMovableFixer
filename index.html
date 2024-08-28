@@ -72,6 +72,18 @@
         ];
         const nandMagic = new Uint8Array([0x4E, 0x43, 0x53, 0x44]); // NCSD
 
+        async function toBytes(blob) {
+            if (blob.bytes) {
+                return await blob.bytes();
+            } else {
+                return await new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => resolve(new Uint8Array(reader.result));
+                    reader.readAsArrayBuffer(blob);
+                });
+            }
+        }
+
         function updateEnablement() {
             fixedBtn.disabled = !(movable.bytes && (!movable.seedminer || allowDom.checked || lfcsDom.checked));
             originalBtn.disabled = !movable.bytes
@@ -128,7 +140,7 @@
         }
         
         async function verifyMovable(bytes) {
-            if (bytes instanceof Blob) bytes = await bytes.bytes();
+            if (bytes instanceof Blob) bytes = await toBytes(bytes);
             if (indexedDB.cmp(bytes.slice(0, 4), movableMagic) === 0) {
                 if (bytes.slice(0x4, 0x110).every(b => b == 0)) {
                     console.log("Seedminer movable");
@@ -154,7 +166,7 @@
 
         async function verifyEssentialAndExtractMovable(file) {
             const check = ([offset, magic]) => new Promise(async (resolve, reject) => {
-                if (indexedDB.cmp(await file.slice(offset, offset + magic.length).bytes(), magic) === 0) {
+                if (indexedDB.cmp(await toBytes(file.slice(offset, offset + magic.length)), magic) === 0) {
                     resolve();
                 } else {
                     reject();
@@ -168,11 +180,11 @@
                 return null;
             }
 
-            if ((await file.slice(0x60, 0x68).bytes()).every(b => b == 0)) {
+            if ((await toBytes(file.slice(0x60, 0x68))).every(b => b == 0)) {
                 infoDom.innerHTML += '<p class="pack text-warning">Your essential backup is old format, which lack hwcal, you might want to update it and your NAND backup.</p>';
             }
 
-            const size = await file.slice(0x2C, 0x30).bytes();
+            const size = await toBytes(file.slice(0x2C, 0x30));
             console.log("Movable Size:", size);
             if (indexedDB.cmp(size.slice(1, 4), new Uint8Array([1, 0, 0])) !== 0 ||
                 (size[0] != 0x20 && size[0] != 0x40)) {
@@ -180,8 +192,8 @@
                 return "size";
             }
 
-            const bytes = await file.slice(0x600, 0x600 + 0x100 + size[0]).bytes();
-            const checksum = await file.slice(0x1A0, 0x1C0).bytes();
+            const bytes = await toBytes(file.slice(0x600, 0x600 + 0x100 + size[0]));
+            const checksum = await toBytes(file.slice(0x1A0, 0x1C0));
             const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
             console.log("Movable Checksum:", checksum, "Calculated:", sha);
             if (indexedDB.cmp(checksum, sha) !== 0) {
@@ -192,15 +204,15 @@
         }
 
         async function extractLFCSFromEssential(file) {
-            const size = await file.slice(0x3C, 0x40).bytes();
+            const size = await toBytes(file.slice(0x3C, 0x40));
             console.log("LFCS Size:", size);
             if (indexedDB.cmp(size, new Uint8Array([0x10, 1, 0, 0])) !== 0) {
                 console.log("Size of LFCS inside essential is invalid!");
                 return null;
             }
 
-            const bytes = await file.slice(0x800, 0x910).bytes();
-            const checksum = await file.slice(0x180, 0x1A0).bytes();
+            const bytes = await toBytes(file.slice(0x800, 0x910));
+            const checksum = await toBytes(file.slice(0x180, 0x1A0));
             const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
             console.log("LFCS Checksum:", checksum, "Calculated:", sha);
             if (indexedDB.cmp(checksum, sha) !== 0) {
@@ -211,7 +223,7 @@
         }
 
         async function verifyNANDAndExtractEssential(file) {
-            if (indexedDB.cmp(await file.slice(0x100, 0x104).bytes(), nandMagic) !== 0) {
+            if (indexedDB.cmp(await toBytes(file.slice(0x100, 0x104)), nandMagic) !== 0) {
                 return null;
             }
 
