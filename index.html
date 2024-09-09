@@ -99,7 +99,45 @@
             }
         }
 
-        function updateMovableInfo() {
+        async function _sha256(bytes) {
+            if (crypto && crypto.subtle && crypto.subtle.digest) {
+                return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+            } else if (window.sha256) {
+                return new Promise((resolve, reject) => {
+                    const sha = window.sha256.create();
+                    sha.update(bytes)
+                    resolve(new Uint8Array(sha.digest()));
+                });
+            } else {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement("script");
+                    script.setAttribute("src", "https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js");
+                    script.setAttribute("type", "text/javascript");
+                    script.setAttribute("async", "async");
+                    script.addEventListener("load", async () => {
+                        resolve(await _sha256(bytes));
+                    });
+                    script.addEventListener("error", () => {
+                        document.body.appendChild(script);
+                        console.log("No SHA256 Support!");
+                        infoDom.innerHTML += '<p class="text-warning">Can\'t calculate checksum, you might need different brwoser!</p>';
+                        reject("NO_SHA256_SUPPORT");
+                    });
+                    document.body.appendChild(script);
+                });
+            }
+        }
+
+        async function calculateID0() {
+            const key = movable.bytes.slice(0x110, 0x120);
+            const sha = await _sha256(key);
+            const id0b = [3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12].map(i => sha[i]);
+            const id0 = id0b.reduce((t, x) => t + x.toString(16).padStart(2, '0'), '');
+            console.log("ID0:", id0);
+            return id0;
+        }
+
+        async function updateMovableInfo() {
             if (movable.bytes === null || (movable.bytes.length != 288 && movable.bytes.length != 320)) {
                 infoDom.innerHTML += "ERROR!?";
                 return;
@@ -131,6 +169,7 @@
                 infoDom.innerHTML += '<p class="bg-danger text-warning">!!! Your embed movable is problematic, you need to update your embed essential backup and NAND backup !!!</p>';
             }
 
+            infoDom.innerHTML += `ID0: ${await calculateID0()}<br>`;
             infoDom.innerHTML += 'Movable is loaded and ready.';
             updateEnablement();
         }
@@ -190,7 +229,7 @@
 
             const bytes = await file.slice(0x600, 0x600 + 0x100 + size[0]).bytes();
             const checksum = await file.slice(0x1A0, 0x1C0).bytes();
-            const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+            const sha = await _sha256(bytes);
             console.log("Movable Checksum:", checksum, "Calculated:", sha);
             if (indexedDB.cmp(checksum, sha) !== 0) {
                 console.log("Checksum of movable inside essential failed!");
@@ -209,7 +248,7 @@
 
             const bytes = await file.slice(0x800, 0x910).bytes();
             const checksum = await file.slice(0x180, 0x1A0).bytes();
-            const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+            const sha = await _sha256(bytes);
             console.log("LFCS Checksum:", checksum, "Calculated:", sha);
             if (indexedDB.cmp(checksum, sha) !== 0) {
                 console.log("Checksum of LFCS inside essential failed!");
