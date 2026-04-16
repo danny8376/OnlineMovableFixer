@@ -26,6 +26,7 @@
                             <div class="form-group">
                                 <input type="button" id="fixed" value="Fixed movable.sed" class="btn btn-primary" disabled>
                                 <input type="button" id="original" value="Original movable.sed" class="btn btn-secondary" disabled>
+                                <input type="button" id="doMine" value="Mine movable.sed" class="btn btn-secondary d-none" disabled>
                                 <div class="form-check d-none" id="allowWrapper">
                                     <input class="form-check-input" type="checkbox" value="" id="allow">
                                     <label class="form-check-label" for="allow"><small>I know what I'm doing, just give me seedminer movable</small></label>
@@ -34,6 +35,20 @@
                                     <input class="form-check-input" type="checkbox" value="" id="lfcs">
                                     <label class="form-check-label" for="lfcs"><small>Fill LFCS from essential backup</small></label>
                                 </div>
+                                <div class="form-check d-none" id="miningWrapper">
+                                    <input class="form-check-input" type="checkbox" value="" id="mining">
+                                    <label class="form-check-label" for="mining"><small>I want to try mining for specific ID0</small></label>
+
+                                </div>
+                                <input type="text" class="form-control form-control-sm d-none" id="target" placeholder="Input your target ID0 here" minlength="32" maxlength="32" pattern="^[a-fA-F0-9]+$">
+                                <span class="invalid-feedback"><small>
+                                    <span id="notID0">
+                                        ID0 must be 32 charactors consist of digits and letter a-f
+                                    </span>
+                                    <span id="sameID0" class="d-none">
+                                        Your desired ID0 is the same as current ID0
+                                    </span>
+                                </small></span>
                             </div>
                         </div>
                     </form>
@@ -47,15 +62,23 @@
         const infoDom = document.querySelector("#info");
         const fixedBtn = document.querySelector("#fixed");
         const originalBtn = document.querySelector("#original");
+        const doMineBtn = document.querySelector("#doMine");
         const allowWrapDom = document.querySelector("#allowWrapper");
         const allowDom = document.querySelector("#allow");
         const lfcsWrapDom = document.querySelector("#lfcsWrapper");
         const lfcsDom = document.querySelector("#lfcs");
+        const miningWrapDom = document.querySelector("#miningWrapper");
+        const miningDom = document.querySelector("#mining");
+        const targetDom = document.querySelector("#target");
+        const notID0Dom = document.querySelector("#notID0");
+        const sameID0Dom = document.querySelector("#sameID0");
         const movableDefault = {
             bytes: null,
             seedminer: false,
             pack: false,
-            lfcs: null
+            lfcs: null,
+            mining: false,
+            mined: false,
         };
         const movable = Object.assign({}, movableDefault);
 
@@ -72,6 +95,9 @@
         ];
         const nandMagic = new Uint8Array([0x4E, 0x43, 0x53, 0x44]); // NCSD
 
+        // assume yes unless failed, as related option only show after movable loade, which will try sha256 first
+        let canSHA256 = true;
+
         if (!Blob.prototype.bytes) Blob.prototype.bytes = function() { // this scope is annoying...
             return new Promise(resolve => {
                 const reader = new FileReader();
@@ -81,8 +107,31 @@
         };
 
         function updateEnablement() {
-            fixedBtn.disabled = !(movable.bytes && (!movable.seedminer || allowDom.checked || lfcsDom.checked));
-            originalBtn.disabled = !movable.bytes
+            fixedBtn.disabled = !(movable.bytes && !movable.mining && (!movable.seedminer || allowDom.checked || lfcsDom.checked));
+            originalBtn.disabled = !movable.bytes || movable.mining || movable.mined;
+
+            movableDom.disabled = movable.mining;
+            doMineBtn.disabled = movable.mining;
+            allowDom.disabled = movable.mining;
+            lfcsDom.disabled = movable.mining;
+            miningDom.disabled = movable.mining;
+            targetDom.disabled = movable.mining;
+            targetDom.classList.remove("is-invalid");
+            if (movable.mining) return;
+
+            if (movable.bytes && canSHA256) {
+                miningWrapDom.classList.remove("d-none");
+            } else {
+                miningWrapDom.classList.add("d-none");
+                miningDom.checked = false;
+            }
+            if (miningDom.checked) {
+                targetDom.classList.remove("d-none");
+                doMineBtn.classList.remove("d-none");
+            } else {
+                targetDom.classList.add("d-none");
+                doMineBtn.classList.add("d-none");
+            }
             if (movable.seedminer) {
                 allowWrapDom.classList.remove("d-none");
                 allowDom.disabled = lfcsDom.checked;
@@ -122,7 +171,8 @@
                     script.addEventListener("error", () => {
                         document.body.appendChild(script);
                         console.log("No SHA256 Support!");
-                        infoDom.innerHTML += '<p class="text-warning">Can\'t calculate checksum, you might need different brwoser!</p>';
+                        infoDom.innerHTML += '<p class="text-warning">Can\'t calculate checksum, you might need different brwoser for checking or mining ID0!</p>';
+                        canSHA256 = false;
                         reject("NO_SHA256_SUPPORT");
                     });
                     document.body.appendChild(script);
@@ -130,11 +180,14 @@
             }
         }
 
+        function idSwap(u8a) {
+            return new Uint8Array([3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12]).map(i => u8a[i]);
+        }
+
         async function calculateID0() {
             const key = movable.bytes.slice(0x110, 0x120);
             const sha = await _sha256(key);
-            const id0b = [3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12].map(i => sha[i]);
-            const id0 = id0b.reduce((t, x) => t + x.toString(16).padStart(2, '0'), '');
+            const id0 = idSwap(sha).reduce((t, x) => t + x.toString(16).padStart(2, '0'), '');
             console.log("ID0:", id0);
             return id0;
         }
@@ -311,6 +364,56 @@
             return true;
         }
 
+        async function mineMovable(data) {
+            data.offset = -(data.offset + (data.offset < 0 ? 0 : 1));
+            data.offsetDom.innerText = data.offset;
+            data.msedv.setUint32(8, data.omsed2 + data.offset, true);
+            const sha = await _sha256(data.bytes.subarray(0x110, 0x120));
+            if (indexedDB.cmp(sha.subarray(0, 16), data.id0b) === 0) {
+                movable.mining = false;
+                movable.mined = true;
+                infoDom.innerHTML += '<p class="pack text-info">Found!</p>';
+                const id0 = await calculateID0(data.bytes.slice(0x110, 0x120));
+                infoDom.innerHTML += `ID0: ${id0}`;
+                updateEnablement();
+            } else {
+                if (data.offset > 3) return;
+                setTimeout(mineMovable, 0, data);
+            }
+        }
+
+        async function tryMineMovable() {
+            if (targetDom.value.length === 0 || !targetDom.checkValidity()) {
+                targetDom.classList.add("is-invalid");
+                notID0.classList.remove("d-none");
+                sameID0.classList.add("d-none");
+                return;
+            }
+            if (await calculateID0() === targetDom.value) {
+                targetDom.classList.add("is-invalid");
+                notID0.classList.add("d-none");
+                sameID0.classList.remove("d-none");
+                return;
+            }
+            targetDom.classList.remove("is-invalid");
+            movable.mining = true;
+            updateEnablement();
+            infoDom.innerHTML += '<p>Mining now... (offset: <span id="offset"></span>)</p>';
+            const offsetDom = document.querySelector("#offset");
+            const msedv = new DataView(movable.bytes.buffer, 0x110, 0x10);
+            const id0b = idSwap(Uint8Array.fromHex(targetDom.value));
+            const data = {
+                bytes: movable.bytes,
+                msedv,
+                offset: 0,
+                offsetDom,
+                omsed2: msedv.getUint32(8, true),
+                id0b,
+            }
+            console.log("Mining info:", data);
+            setTimeout(mineMovable, 0, data);
+        }
+
         async function fileSelected(filelist) {
             Object.assign(movable, movableDefault);
             infoDom.innerHTML = "";
@@ -321,7 +424,7 @@
             for (const file of filelist) {
                 // filename is kinda meaningless...
                 // hope depends on file size is fine?
-                console.log(file)
+                console.log(file);
                 switch (file.size) {
                     case 288:
                     case 320:
@@ -348,7 +451,7 @@
         }
 
         fixedBtn.addEventListener("click", event => {
-            if (!movable.bytes) return;
+            if (!movable.bytes || movable.mining) return;
             const fixed = new Uint8Array(288);
             fixed.set(movableMagic);
             if (movable.lfcs && lfcsDom.checked) {
@@ -360,22 +463,29 @@
             saveMovable(fixed);
         });
         originalBtn.addEventListener("click", event => {
-            if (!movable.bytes) return;
-                saveMovable();
+            if (!movable.bytes || movable.mining) return;
+            saveMovable();
+        });
+        doMineBtn.addEventListener("click", event => {
+            if (!movable.bytes || movable.mining) return;
+            tryMineMovable();
         });
         allowDom.addEventListener("change", updateEnablement);
         lfcsDom.addEventListener("change", updateEnablement);
+        miningDom.addEventListener("change", updateEnablement);
         
         window.addEventListener("dragover", event => {
             event.preventDefault();
         });
         window.addEventListener("drop", event => {
             event.preventDefault();
+            if (movable.mining) return;
             movableDom.value = "";
             fileSelected(event.dataTransfer.files);
         });
 
         movableDom.addEventListener("change", event => {
+            if (movable.mining) return;
             fileSelected(movableDom.files);
         })
         movableDom.disabled = false;
