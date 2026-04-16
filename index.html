@@ -365,19 +365,28 @@
         }
 
         async function mineMovable(data) {
-            data.offset = -(data.offset + (data.offset < 0 ? 0 : 1));
-            data.offsetDom.innerText = data.offset;
-            data.msedv.setUint32(8, data.omsed2 + data.offset, true);
-            const sha = await _sha256(data.bytes.subarray(0x110, 0x120));
-            if (indexedDB.cmp(sha.subarray(0, 16), data.id0b) === 0) {
-                movable.mining = false;
-                movable.mined = true;
-                infoDom.innerHTML += '<p class="pack text-info">Found!</p>';
-                const id0 = await calculateID0(data.bytes.slice(0x110, 0x120));
-                infoDom.innerHTML += `ID0: ${id0}`;
-                updateEnablement();
-            } else {
-                setTimeout(mineMovable, 0, data);
+            data.offsetDom.innerText = data.offset < 0 ? data.offset : ` ${data.offset}`;
+            for (;;) {
+                data.offset = -(data.offset + (data.offset < 0 ? 0 : 1));
+                data.msedv.setUint32(8, data.omsed2 + data.offset, true);
+                const sha = await _sha256(data.bytes.subarray(0x110, 0x120));
+                if (indexedDB.cmp(sha.subarray(0, 16), data.id0b) === 0) {
+                    movable.mining = false;
+                    movable.mined = true;
+                    data.offsetDom.innerText = data.offset < 0 ? data.offset : ` ${data.offset}`;
+                    const time = ((performance.now() - data.start) / 1000).toFixed(2);
+                    infoDom.innerHTML += `<p class="pack text-info">Found in ${time}s!</p>`;
+                    const id0 = await calculateID0(data.bytes.slice(0x110, 0x120));
+                    infoDom.innerHTML += `ID0: ${id0}`;
+                    updateEnablement();
+                    return;
+                }
+                const last = performance.now();
+                if (last - data.last > 50) {
+                    data.last = last;
+                    setTimeout(mineMovable, 0, data);
+                    break;
+                }
             }
         }
 
@@ -397,7 +406,7 @@
             targetDom.classList.remove("is-invalid");
             movable.mining = true;
             updateEnablement();
-            infoDom.innerHTML += '<p>Mining now... (offset: <span id="offset"></span>)</p>';
+            infoDom.innerHTML += '<p>Mining now... (offset:<span id="offset"></span>)</p>';
             const offsetDom = document.querySelector("#offset");
             const msedv = new DataView(movable.bytes.buffer, 0x110, 0x10);
             const id0b = idSwap(Uint8Array.fromHex(targetDom.value));
@@ -408,6 +417,8 @@
                 offsetDom,
                 omsed2: msedv.getUint32(8, true),
                 id0b,
+                start: performance.now(),
+                last: performance.now(),
             }
             console.log("Mining info:", data);
             setTimeout(mineMovable, 0, data);
